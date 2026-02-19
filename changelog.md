@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Known Issues]
 - None. Please feel free to submit an issue via [GitHub](https://github.com/ryanblenis/MeshCentral-RoutePlus) if you find anything.
 
+## [0.1.8-onix.1] - 2026-02-19
+### Fixed
+- Route tunnel cleanup and stability improvements for repeated MSSQL forwarding (fork build).
+- Fork metadata now points to `onix-informatika/MeshCentral-RoutePlus`.
+
 ## [0.1.7] - 2025-03-03
 ### Fixed
 - Merge PR fixing potential MeshCentral ping control channel interference issues (PR#22; thanks Daniel)
