@@ -77,12 +77,15 @@ function consoleaction(args, rights, sessionid, parent) {
                 delete routeTrack[args.mid];
                 dbg('wait timer set');
                 args.waitTimer = 'y';
-                waitTimer = setInterval(function() { consoleaction(args, rights, sessionid, parent); }, 1000);
+                waitTimer[args.mid] = setInterval(function() { consoleaction(args, rights, sessionid, parent); }, 1000);
                 return;
             } else {
                 dbg('No existing route found, continuing');
             }
-            if (waitTimer[args.mid] != null) clearTimeout(waitTimer[args.mid]);
+            if (waitTimer[args.mid] != null) {
+                clearInterval(waitTimer[args.mid]);
+                delete waitTimer[args.mid];
+            }
             dbg('Starting Route');
             //dbg('Got: ' + JSON.stringify(args));
             latestAuthCookie = args.rauth;
@@ -185,17 +188,23 @@ function RoutePlusRoute() {
             }*/
             // 'connection' listener
             c.on('end', function () { disconnectTunnel(this, this.websocket, "Client closed"); });
+            c.on('close', function () { disconnectTunnel(this, this.websocket, "Client socket closed"); });
+            c.on('error', function () { disconnectTunnel(this, this.websocket, "Client socket error"); });
             c.pause();
             try {
                 var options = http.parseUri(rObj.settings.serverurl + '?noping=1&auth=' + latestAuthCookie + '&nodeid=' + rObj.settings.remotenodeid + '&tcpport=' + rObj.settings.remoteport + (rObj.settings.remotetarget == null ? '' : '&tcpaddr=' + rObj.settings.remotetarget));
             } catch (e) { dbg("Unable to parse \"serverUrl\"." + e); return; }
             options.checkServerIdentity = this.onVerifyServer;
             options.rejectUnauthorized = false;
+            options.agent = false;
             c.websocket = http.request(options);
             c.websocket.tcp = c;
             c.websocket.tunneling = false;
             c.websocket.upgrade = OnWebSocket;
-            c.websocket.on('error', function (e) { dbg("ERROR: " + JSON.stringify(e)); });
+            c.websocket.on('error', function (e) {
+                dbg("ERROR: " + JSON.stringify(e));
+                disconnectTunnel(this.tcp, this, "Websocket request error");
+            });
             c.websocket.end();
         } catch (e) { debug(2, 'catch block 2' + e); }
     };
@@ -230,8 +239,14 @@ function debug(level, message) { { dbg(message); } }
 
 // Disconnect both TCP & WebSocket connections and display a message.
 function disconnectTunnel(tcp, ws, msg) {
-    if (ws != null) { try { ws.end(); } catch (e) { debug(2, e); } }
-    if (tcp != null) { try { tcp.end(); } catch (e) { debug(2, e); } }
+    if (ws != null) {
+        try { ws.end(); } catch (e) { debug(2, e); }
+        try { ws.destroy(); } catch (e) { debug(2, e); }
+    }
+    if (tcp != null) {
+        try { tcp.end(); } catch (e) { debug(2, e); }
+        try { tcp.destroy(); } catch (e) { debug(2, e); }
+    }
     debug(1, "Tunnel disconnected: " + msg);
 }
 
