@@ -25,7 +25,8 @@ module.exports.routeplus = function (parent) {
       'updateUserRdpLinks',
       'dlRDPfile',
       'updateRdpDeviceLinks',
-      'cantMap'
+      'cantMap',
+      'routeError'
     ];
     
     obj.server_startup = function() {
@@ -135,12 +136,20 @@ module.exports.routeplus = function (parent) {
     };
     
     obj.startRoute = function(comp, map, rcookie) {
+        var uinfo = map.user.split('/');
+        var domainId = uinfo[1];
+        var relayUrl = null;
+        var domainConfig = (obj.meshServer.config != null && obj.meshServer.config.domains != null) ? obj.meshServer.config.domains[domainId] : null;
+        if ((domainConfig != null) && (typeof domainConfig.certUrl === 'string') && (domainConfig.certUrl.length > 0)) {
+            relayUrl = domainConfig.certUrl.replace(/\/cert\/?$/i, '/meshrelay.ashx');
+        }
         const command = {
             action: 'plugin',
             plugin: 'routeplus',
             pluginaction: 'startRoute',
             mid: map._id,
             rauth: rcookie,
+            relayurl: relayUrl,
             nodeid: map.toNode,
             remotetarget: map.toIP,
             remoteport: map.port,
@@ -166,6 +175,16 @@ module.exports.routeplus = function (parent) {
         if (isNew) pluginHandler.routeplus.cantMapStore.push(msg.mapId);
         try {
             pluginHandler.routeplus.cantMapIn(msg, isNew);
+        } catch (e) { }
+    };
+    
+    obj.routeError = function(e, msg) {
+        if (pluginHandler.routeplus.routeErrorStore == null) pluginHandler.routeplus.routeErrorStore = {};
+        var errorKey = msg.mapId + ':' + msg.reason + ':' + (msg.error == null ? '' : msg.error);
+        var isNew = (pluginHandler.routeplus.routeErrorStore[msg.mapId] !== errorKey);
+        pluginHandler.routeplus.routeErrorStore[msg.mapId] = errorKey;
+        try {
+            pluginHandler.routeplus.routeErrorIn(msg, isNew);
         } catch (e) { }
     };
     
@@ -454,17 +473,65 @@ module.exports.routeplus = function (parent) {
                 obj.debug('PLUGIN', 'RoutePlus', 'Client cannot map forced port for id: ' + command.mid);
                 obj.db.get(command.mid)
                 .then(maps => {
-                    var x = {
-                        action: "plugin",
-                        plugin: "routeplus",
-                        method: "cantMap",
-                        mapId: maps[0]._id,
-                        localport: maps[0].localport,
-                        toNode: maps[0].toNode
-                    };
-                    obj.sendUpdateToUser(maps[0].user, x);
+                    if (maps.length === 0) return Promise.resolve();
+                    var failedMap = maps[0];
+                    return obj.db.getUserMaps(failedMap.user)
+                    .then((userMaps) => {
+                        var localport = parseInt(failedMap.localport);
+                        var duplicateMap = userMaps.find(m => (m._id !== failedMap._id) && (parseInt(m.localport) === localport));
+                        if (duplicateMap != null) {
+                            obj.debug('PLUGIN', 'RoutePlus', 'Removing duplicate map ' + failedMap._id + ' because map ' + duplicateMap._id + ' already reserves local port ' + localport);
+                            return obj.db.delete(failedMap._id)
+                            .then(() => obj.db.getUserMaps(failedMap.user))
+                            .then(updatedMaps => {
+                                obj.sendUpdateToUser(failedMap.user, { action: "plugin", plugin: "routeplus", method: "mapUpdate", data: updatedMaps });
+                                obj.sendUpdateToUser(failedMap.user, {
+                                    action: "plugin",
+                                    plugin: "routeplus",
+                                    method: "routeError",
+                                    mapId: failedMap._id,
+                                    localport: failedMap.localport,
+                                    toNode: failedMap.toNode,
+                                    reason: "duplicateLocalPort",
+                                    error: command.error,
+                                    existingMapId: duplicateMap._id,
+                                    existingToNode: duplicateMap.toNode
+                                });
+                            });
+                        }
+                        obj.sendUpdateToUser(failedMap.user, {
+                            action: "plugin",
+                            plugin: "routeplus",
+                            method: "cantMap",
+                            mapId: failedMap._id,
+                            localport: failedMap.localport,
+                            toNode: failedMap.toNode,
+                            error: command.error
+                        });
+                        return Promise.resolve();
+                    });
                 })
                 .catch(e => console.log('PLUGIN: RoutePlus: CantMap Reporting Error: ', e));
+            break;
+            case 'routeError':
+                obj.db.get(command.mid)
+                .then(maps => {
+                    if (maps.length === 0) return Promise.resolve();
+                    var map = maps[0];
+                    obj.debug('PLUGIN', 'RoutePlus', 'Route error for id ' + command.mid + ' (' + (command.reason || 'unknown') + '): ' + (command.error || 'Unknown error'));
+                    obj.sendUpdateToUser(map.user, {
+                        action: "plugin",
+                        plugin: "routeplus",
+                        method: "routeError",
+                        mapId: map._id,
+                        localport: map.localport,
+                        toNode: map.toNode,
+                        reason: command.reason,
+                        error: command.error
+                    });
+                    return Promise.resolve();
+                })
+                .catch(e => console.log('PLUGIN: RoutePlus: Route error reporting failed: ', e));
             break;
             case 'rdpLinkUpdate':
                 var upUser = null;

@@ -32,6 +32,46 @@ var dbg = function(str) {
     logStream.end('\n');
 }
 
+function safeErrorString(e) {
+    if (e == null) return 'Unknown error';
+    if (typeof e === 'string') return e;
+    var parts = [];
+    if (e.code != null) parts.push(e.code);
+    if (e.message != null) parts.push(e.message);
+    if (parts.length > 0) return parts.join(': ');
+    try { return JSON.stringify(e); } catch (ex) { }
+    return '' + e;
+}
+
+function sendPluginCommand(action, data) {
+    var msg = {
+        action: 'plugin',
+        plugin: 'routeplus',
+        pluginaction: action,
+        sessionid: _sessionid,
+        tag: 'console'
+    };
+    if (data != null) {
+        Object.keys(data).forEach(function(k) { msg[k] = data[k]; });
+    }
+    mesh.SendCommand(msg);
+}
+
+function reportRouteError(mid, reason, err, localport) {
+    var errorText = safeErrorString(err);
+    dbg('Route error [' + reason + '] for ' + mid + ': ' + errorText);
+    try {
+        sendPluginCommand('routeError', {
+            mid: mid,
+            reason: reason,
+            error: errorText,
+            localport: localport
+        });
+    } catch (ex) {
+        dbg('Unable to report route error for ' + mid + ': ' + safeErrorString(ex));
+    }
+}
+
 Array.prototype.remove = function(from, to) {
   var rest = this.slice((to || from) + 1 || this.length);
   this.length = from < 0 ? this.length + from : from;
@@ -91,53 +131,39 @@ function consoleaction(args, rights, sessionid, parent) {
             latestAuthCookie = args.rauth;
             var r = new RoutePlusRoute();
             var settings = {
-                serverurl: mesh.ServerUrl.replace('agent.ashx', 'meshrelay.ashx'),
+                mapid: args.mid,
+                serverurl: ((typeof args.relayurl == 'string') && (args.relayurl.length > 0)) ? args.relayurl : mesh.ServerUrl.replace('agent.ashx', 'meshrelay.ashx'),
                 remotenodeid: args.nodeid,
                 remotetarget: args.remotetarget,
                 remoteport: args.remoteport,
                 localport: args.localport == null ? 0 : args.localport,
                 forceSrcPort: args.forceSrcPort
             };
-            var was_error = false;
             try {
+                r.onListen = function(actualLocalPort) {
+                    dbg('Listening on ' + actualLocalPort);
+                    if (args.localport != actualLocalPort) {
+                        dbg('Sending updated port ' + actualLocalPort);
+                        sendPluginCommand('updateMapPort', {
+                            mid: args.mid,
+                            port: actualLocalPort
+                        });
+                    }
+                };
                 r.startRouter(settings);
                 routeTrack[args.mid] = r;
-            } catch (e) { was_error = true; }
-            
-            if (was_error && args.forceSrcPort == true) {
-                dbg('Source port is forced, but unavailable. Not mapping. (port: ' + args.localport + ')');
-                mesh.SendCommand({ 
-                    "action": "plugin", 
-                    "plugin": "routeplus",
-                    "pluginaction": "cantMapPort",
-                    "sessionid": _sessionid,
-                    "tag": "console",
-                    "mid": args.mid
-                });
+            } catch (e) {
+                if (args.forceSrcPort == true) {
+                    dbg('Source port is forced, but unavailable. Not mapping. (port: ' + args.localport + ')');
+                    sendPluginCommand('cantMapPort', {
+                        mid: args.mid,
+                        error: safeErrorString(e),
+                        localport: args.localport
+                    });
+                } else {
+                    reportRouteError(args.mid, 'listenError', e, args.localport);
+                }
                 return;
-            }
-            
-            if (was_error && args.forceSrcPort == false) { // probably port in use, try again with new port
-                was_error = false;
-                settings.localport = 0;
-                try {
-                    r.startRouter(settings);
-                    routeTrack[args.mid] = r;
-                } catch (e) { was_error = true; }
-            }
-            var actualLocalPort = r.tcpserver.address().port;
-            dbg('Listening on ' + actualLocalPort);
-            if (args.localport != actualLocalPort) {
-                dbg('Sending updated port ' + actualLocalPort);
-                mesh.SendCommand({ 
-                    "action": "plugin", 
-                    "plugin": "routeplus",
-                    "pluginaction": "updateMapPort",
-                    "sessionid": _sessionid,
-                    "tag": "console",
-                    "mid": args.mid,
-                    "port": actualLocalPort
-                });
             }
         break;
         case 'endRoute':
@@ -172,6 +198,7 @@ function RoutePlusRoute() {
     rObj.settings = null;
     
     rObj.tcpserver = null;
+    rObj.onListen = null;
     rObj.startRouter = startRouter;
     rObj.debug = debug;
     rObj.OnTcpClientConnected = function (c) {
@@ -193,7 +220,12 @@ function RoutePlusRoute() {
             c.pause();
             try {
                 var options = http.parseUri(rObj.settings.serverurl + '?noping=1&auth=' + latestAuthCookie + '&nodeid=' + rObj.settings.remotenodeid + '&tcpport=' + rObj.settings.remoteport + (rObj.settings.remotetarget == null ? '' : '&tcpaddr=' + rObj.settings.remotetarget));
-            } catch (e) { dbg("Unable to parse \"serverUrl\"." + e); return; }
+            } catch (e) {
+                dbg("Unable to parse \"serverUrl\"." + e);
+                reportRouteError(rObj.settings.mapid, 'parseServerUrl', e, rObj.settings.localport);
+                disconnectTunnel(c, null, "Unable to parse server URL");
+                return;
+            }
             options.checkServerIdentity = this.onVerifyServer;
             options.rejectUnauthorized = false;
             options.agent = false;
@@ -203,10 +235,14 @@ function RoutePlusRoute() {
             c.websocket.upgrade = OnWebSocket;
             c.websocket.on('error', function (e) {
                 dbg("ERROR: " + JSON.stringify(e));
+                reportRouteError(rObj.settings.mapid, 'websocketRequestError', e, rObj.settings.localport);
                 disconnectTunnel(this.tcp, this, "Websocket request error");
             });
             c.websocket.end();
-        } catch (e) { debug(2, 'catch block 2' + e); }
+        } catch (e) {
+            reportRouteError(rObj.settings.mapid, 'connectionSetupError', e, rObj.settings.localport);
+            debug(2, 'catch block 2' + e);
+        }
     };
     rObj.disconnectTunnel = disconnectTunnel;
     rObj.OnWebSocket = OnWebSocket;
@@ -217,14 +253,37 @@ function RoutePlusRoute() {
 function startRouter(settings) {
     this.settings = settings;
     this.tcpserver = net.createServer(this.OnTcpClientConnected);
-    this.tcpserver.on('error', function (e) { dbg("ERROR: " + JSON.stringify(e)); exit(0); return; });
     var t = this;
+    this.tcpserver.on('error', function (e) {
+        dbg("ERROR: " + JSON.stringify(e));
+        if (routeTrack[t.settings.mapid] === t) {
+            delete routeTrack[t.settings.mapid];
+        }
+        try { t.tcpserver.close(); } catch (ex) { }
+        if (t.settings.forceSrcPort === true) {
+            dbg('Source port is forced, but unavailable. Not mapping. (port: ' + t.settings.localport + ')');
+            try {
+                sendPluginCommand('cantMapPort', {
+                    mid: t.settings.mapid,
+                    error: safeErrorString(e),
+                    localport: t.settings.localport
+                });
+            } catch (ex) {
+                dbg('Unable to report cantMapPort for ' + t.settings.mapid + ': ' + safeErrorString(ex));
+            }
+            return;
+        }
+        reportRouteError(t.settings.mapid, 'listenError', e, t.settings.localport);
+    });
     this.tcpserver.listen(this.settings.localport, function () {
         // We started listening.
         if (t.settings.remotetarget == null) {
             dbg('Redirecting local port ' + t.lport + ' to remote port ' + t.settings.remoteport + '.');
         } else {
             dbg('Redirecting local port ' + t.lport + ' to ' + t.settings.remotetarget + ':' + t.settings.remoteport + '.');
+        }
+        if (typeof t.onListen === 'function') {
+            t.onListen(t.tcpserver.address().port);
         }
         //console.log("Press ctrl-c to exit.");
 

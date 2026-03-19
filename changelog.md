@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Known Issues]
 - None. Please feel free to submit an issue via [GitHub](https://github.com/ryanblenis/MeshCentral-RoutePlus) if you find anything.
 
+## [0.1.8.4] - 2026-03-19
+### Fixed
+- Stop relying on the agent's `mesh.ServerUrl` for RoutePlus relay setup; the server now sends an explicit `meshrelay.ashx` URL so source-agent tunnels build a valid relay destination.
+
+## [0.1.8.3] - 2026-03-19
+### Fixed
+- Report agent-side relay startup errors back to the UI instead of silently closing the local tunnel.
+- Auto-remove failed duplicate forced-port mappings when an existing RoutePlus mapping already owns the same source port.
+- Normalize blank source ports to `0` to avoid `NaN` leaking into saved mappings.
+
 ## [0.1.8.2] - 2026-03-19
 ### Fixed
 - Reject duplicate forced source ports before creating dead mappings.

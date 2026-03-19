@@ -226,7 +226,7 @@ function addMap(el) {
         'toNode': nodeId,
         'toIP': destIP.value == '' ? null : destIP.value,
         'port': parseInt(port.value),
-        'srcport': parseInt(srcport.value),
+        'srcport': srcport.value == '' ? 0 : parseInt(srcport.value),
         'forceSrcPort': srcport.value == '' ? false : true
     });
 }
@@ -240,7 +240,11 @@ parent.pluginHandler.routeplus.cantMapIn = function(msg, isNew) {
     updateSelTable();
     if (isNew !== true) return;
     var portText = (msg != null && msg.localport != null) ? msg.localport : 'the requested port';
-    parent.setDialogMode(2, "RoutePlus", 1, null, "Unable to bind forced source port " + portText + " on your source computer. Another RoutePlus mapping or a local process is already using it. Remove the conflicting mapping or leave Source Port blank to auto-assign a free port.");
+    var extraText = '';
+    if (msg != null && msg.error) {
+        extraText = " Error from the source agent: " + msg.error + ".";
+    }
+    parent.setDialogMode(2, "RoutePlus", 1, null, "Unable to bind forced source port " + portText + " on your source computer. Another RoutePlus mapping or a local process is already using it. Remove the conflicting mapping or leave Source Port blank to auto-assign a free port." + extraText);
 };
 parent.pluginHandler.routeplus.addMapRejected = function(state, msg) {
     var existingMap = (mappings || []).find(function(m) { return m._id == msg.existingMapId; });
@@ -252,6 +256,21 @@ parent.pluginHandler.routeplus.addMapRejected = function(state, msg) {
         existingTarget = 'an existing mapping for a missing device';
     }
     parent.setDialogMode(2, "RoutePlus", 1, null, "Source port " + msg.localport + " is already reserved by " + existingTarget + ". Remove that mapping first or leave Source Port blank to auto-assign a free port.");
+};
+if (parent.pluginHandler.routeplus.routeErrorStore == null) parent.pluginHandler.routeplus.routeErrorStore = {};
+parent.pluginHandler.routeplus.routeErrorIn = function(msg, isNew) {
+    if (msg == null) return;
+    if (msg.reason == 'duplicateLocalPort') {
+        parent.pluginHandler.routeplus.addMapRejected(null, msg);
+        return;
+    }
+    updateSelTable();
+    if (isNew !== true) return;
+    var targetNode = nodeMap[msg.toNode];
+    var targetName = (targetNode != null) ? targetNode.name : 'the selected device';
+    var portText = (msg.localport != null) ? msg.localport : 'the requested port';
+    var details = (msg.error != null && msg.error !== '') ? (" Agent error: " + msg.error + ".") : '';
+    parent.setDialogMode(2, "RoutePlus", 1, null, "RoutePlus opened source port " + portText + " on your source computer, but the relay to " + targetName + " could not be started." + details);
 };
 function removeMap(el) {
     var row = el.parentNode.parentNode, 
