@@ -90,7 +90,8 @@ module.exports.routeplus = function (parent) {
         obj.onlineNodes = Object.keys(obj.meshServer.webserver.wsagents);
         //console.log('s1', obj.meshServer.webserver.wssessions);
         //console.log('s2', Object.keys(obj.meshServer.webserver.wssessions2));
-        obj.db.getMyComputer(user._id)
+        obj.cleanupStaleUserData(user._id)
+        .then(() => obj.db.getMyComputer(user._id))
         .then(mys => {
             if (mys.length) {
                 myComp = mys[0].node;
@@ -115,7 +116,8 @@ module.exports.routeplus = function (parent) {
         .then((mys) => {
             if (mys.length) {
                 var my = mys[0];
-                obj.db.getUserMaps(my.user)
+                obj.cleanupStaleUserData(my.user)
+                .then(() => obj.db.getUserMaps(my.user))
                 .then(maps => {
                     var onlineUsers = Object.keys(obj.meshServer.webserver.wssessions);
                     if (maps.length && onlineUsers.indexOf(my.user) !== -1) { // if we have a mapping and our user is online, map it
@@ -211,7 +213,8 @@ module.exports.routeplus = function (parent) {
             return;
         } else {
             var vars = {};
-            obj.db.getUserMaps(user._id)
+            obj.cleanupStaleUserData(user._id)
+            .then(() => obj.db.getUserMaps(user._id))
             .then(maps => {
                 if (maps.length) vars.mappings = JSON.stringify(maps);
                 else vars.mappings = 'null';
@@ -234,6 +237,29 @@ module.exports.routeplus = function (parent) {
         }
         res.sendStatus(401); 
         return;
+    };
+    obj.getMainDbRecord = function(id) {
+        return new Promise((resolve) => {
+            obj.meshServer.db.Get(id, function(err, docs) {
+                if ((err != null) || (docs == null) || (docs.length === 0)) { resolve(null); return; }
+                resolve(docs[0]);
+            });
+        });
+    };
+    obj.cleanupStaleUserData = async function(userId) {
+        var maps = await obj.db.getUserMaps(userId);
+        for (const map of maps) {
+            var targetNode = await obj.getMainDbRecord(map.toNode);
+            if (targetNode != null) continue;
+            await obj.endRoute(map._id).catch(() => { });
+            await obj.db.delete(map._id);
+        }
+        var myComputers = await obj.db.getMyComputer(userId);
+        if (myComputers.length === 0) return;
+        var myComputerNode = await obj.getMainDbRecord(myComputers[0].node);
+        if (myComputerNode == null) {
+            await obj.db.delete(myComputers[0]._id);
+        }
     };
     
     obj.removeMapFromComp = function(id) {
@@ -294,6 +320,7 @@ module.exports.routeplus = function (parent) {
                 var requestedSrcPort = parseInt(command.srcport);
                 var isForcedSrcPort = (command.forceSrcPort === true) && Number.isInteger(requestedSrcPort) && (requestedSrcPort > 0);
                 Promise.resolve()
+                .then(() => obj.cleanupStaleUserData(command.user))
                 .then(() => {
                     if (isForcedSrcPort !== true) return [];
                     return obj.db.getUserMaps(command.user);
