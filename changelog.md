@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Known Issues]
 - None. Please feel free to submit an issue via [GitHub](https://github.com/ryanblenis/MeshCentral-RoutePlus) if you find anything.
 
+## [0.1.8-onix.2] - 2026-03-19
+### Fixed
+- Reject duplicate forced source ports before creating dead mappings.
+- Clean up stale RoutePlus mappings that point to deleted devices.
+- Show clear UI errors when a forced source port is unavailable.
+- Prevent the RoutePlus page from breaking when a saved mapping references a missing device.
+
 ## [0.1.8-onix.1] - 2026-02-19
 ### Fixed
 - Route tunnel cleanup and stability improvements for repeated MSSQL forwarding (fork build).
