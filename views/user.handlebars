@@ -179,7 +179,12 @@ function updateMyComputer() {
     var holder = Q('myComp');
     var s = '';
     if (myComputer != null) {
-        s = `<div class="nIcon j${nodeMap[myComputer.node].icon}"></div>${nodeMap[myComputer.node].name}`;
+        var myNode = nodeMap[myComputer.node];
+        if (myNode != null) {
+            s = `<div class="nIcon j${myNode.icon}"></div>${myNode.name}`;
+        } else {
+            s = '<span>(missing device)</span>';
+        }
     } else {
         s = '<span>None selected.</span>';
     }
@@ -231,8 +236,22 @@ parent.pluginHandler.routeplus.mapUpdate = function(state, msg) {
     parent.pluginHandler.routeplus.updateRdpDeviceLinks();
 };
 if (parent.pluginHandler.routeplus.cantMapStore == null) parent.pluginHandler.routeplus.cantMapStore = [];
-parent.pluginHandler.routeplus.cantMapIn = function() {
+parent.pluginHandler.routeplus.cantMapIn = function(msg, isNew) {
     updateSelTable();
+    if (isNew !== true) return;
+    var portText = (msg != null && msg.localport != null) ? msg.localport : 'the requested port';
+    parent.setDialogMode(2, "RoutePlus", 1, null, "Unable to bind forced source port " + portText + " on your source computer. Another RoutePlus mapping or a local process is already using it. Remove the conflicting mapping or leave Source Port blank to auto-assign a free port.");
+};
+parent.pluginHandler.routeplus.addMapRejected = function(state, msg) {
+    var existingMap = (mappings || []).find(function(m) { return m._id == msg.existingMapId; });
+    var existingNode = (existingMap != null) ? nodeMap[existingMap.toNode] : null;
+    var existingTarget = 'another RoutePlus mapping';
+    if (existingNode != null) {
+        existingTarget = 'the existing mapping for ' + existingNode.name;
+    } else if (existingMap != null) {
+        existingTarget = 'an existing mapping for a missing device';
+    }
+    parent.setDialogMode(2, "RoutePlus", 1, null, "Source port " + msg.localport + " is already reserved by " + existingTarget + ". Remove that mapping first or leave Source Port blank to auto-assign a free port.");
 };
 function removeMap(el) {
     var row = el.parentNode.parentNode, 
@@ -336,6 +355,7 @@ function updateSelTable() {
   if (mappings != null && mappings.length) {
       mappings.forEach(function(i) {
           var item = {...i, ...{}};
+          var targetNode = nodeMap[item.toNode];
           if (parent.pluginHandler.routeplus.cantMapStore.indexOf(item._id) >= 0) {
               item.warningHtml1 = '<span title="Port is forced but in use, cannot start!" class="red">';
               item.warningHtml2 = '</span>';
@@ -348,7 +368,9 @@ function updateSelTable() {
           if (item.protoTxt == 'undefined' || item.protoTxt == null) item.protoTxt = 'Custom';
           item.checkedHtml = item.rdplink === true ? 'checked' : '';
           if (item.protoTxt != 'Custom' && item.protoTxt != 'RDP') item.checkedHtml = 'disabled';
-          let tpl = `<td><div class="nIcon j${nodeMap[item.toNode].icon}"></div>${nodeMap[item.toNode].name}</td>
+          let targetNodeIcon = (targetNode != null) ? targetNode.icon : 1;
+          let targetNodeName = (targetNode != null) ? targetNode.name : '(missing device)';
+          let tpl = `<td><div class="nIcon j${targetNodeIcon}"></div>${targetNodeName}</td>
             <td>${item.protoTxt}</td>
             <td>${item.toIPTxt}</td>
             <td>${item.port}</td>

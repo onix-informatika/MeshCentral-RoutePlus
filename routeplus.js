@@ -160,9 +160,10 @@ module.exports.routeplus = function (parent) {
     
     obj.cantMap = function(e, msg) {
         if (pluginHandler.routeplus.cantMapStore == null) pluginHandler.routeplus.cantMapStore = [];
-        pluginHandler.routeplus.cantMapStore.push(msg.mapId);
+        var isNew = (pluginHandler.routeplus.cantMapStore.indexOf(msg.mapId) === -1);
+        if (isNew) pluginHandler.routeplus.cantMapStore.push(msg.mapId);
         try {
-            pluginHandler.routeplus.cantMapIn();
+            pluginHandler.routeplus.cantMapIn(msg, isNew);
         } catch (e) { }
     };
     
@@ -290,21 +291,48 @@ module.exports.routeplus = function (parent) {
         switch (command.pluginaction) {
             case 'addMap':
                 var newMapId = null, myComp = null;
-                obj.db.addMap(command.user, command.toNode, command.port, command.srcport, command.forceSrcPort, command.toIP)
+                var requestedSrcPort = parseInt(command.srcport);
+                var isForcedSrcPort = (command.forceSrcPort === true) && Number.isInteger(requestedSrcPort) && (requestedSrcPort > 0);
+                Promise.resolve()
+                .then(() => {
+                    if (isForcedSrcPort !== true) return [];
+                    return obj.db.getUserMaps(command.user);
+                })
+                .then((existingMaps) => {
+                    if ((existingMaps != null) && (existingMaps.find(m => parseInt(m.localport) === requestedSrcPort) != null)) {
+                        var existingMap = existingMaps.find(m => parseInt(m.localport) === requestedSrcPort);
+                        var x = {
+                            action: "plugin",
+                            plugin: "routeplus",
+                            method: "addMapRejected",
+                            reason: "duplicateLocalPort",
+                            localport: requestedSrcPort,
+                            existingMapId: existingMap._id,
+                            existingToNode: existingMap.toNode
+                        };
+                        obj.sendUpdateToUser(command.user, x);
+                        return null;
+                    }
+                    return obj.db.addMap(command.user, command.toNode, command.port, command.srcport, command.forceSrcPort, command.toIP);
+                })
                 .then((newMapInfo) => {
+                    if (newMapInfo == null) return null;
                     newMapId = newMapInfo.insertedId;
                     return obj.db.getUserMaps(command.user);
                 })
                 .then(maps => {
+                    if (maps == null) return null;
                     var x = { action: "plugin", plugin: "routeplus", method: "mapUpdate", data: maps};
                     myparent.ws.send(JSON.stringify(x));
                     return obj.db.getMyComputer(command.user);
                 })
                 .then((mcs) => {
+                    if ((mcs == null) || (mcs.length === 0)) return null;
                     myComp = mcs[0].node;
                     return obj.db.get(newMapId);
                 })
                 .then((maps) => {
+                    if ((maps == null) || (maps.length === 0)) return;
                     var uinfo = command.user.split('/');
                     var rcookie = parent.parent.encodeCookie({ userid: command.user, domainid: uinfo[1] }, obj.meshServer.loginCookieEncryptionKey);
 
@@ -399,7 +427,14 @@ module.exports.routeplus = function (parent) {
                 obj.debug('PLUGIN', 'RoutePlus', 'Client cannot map forced port for id: ' + command.mid);
                 obj.db.get(command.mid)
                 .then(maps => {
-                    var x = { action: "plugin", plugin: "routeplus", method: "cantMap", mapId: maps[0]._id };
+                    var x = {
+                        action: "plugin",
+                        plugin: "routeplus",
+                        method: "cantMap",
+                        mapId: maps[0]._id,
+                        localport: maps[0].localport,
+                        toNode: maps[0].toNode
+                    };
                     obj.sendUpdateToUser(maps[0].user, x);
                 })
                 .catch(e => console.log('PLUGIN: RoutePlus: CantMap Reporting Error: ', e));
