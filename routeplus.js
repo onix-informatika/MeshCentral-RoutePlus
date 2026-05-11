@@ -13,6 +13,9 @@ module.exports.routeplus = function (parent) {
     obj.meshServer = parent.parent;
     obj.debug = obj.meshServer.debug;
     obj.onlineNodes = [];
+    obj.routeAuthCookieLifetimeMs = 24 * 60 * 60 * 1000;
+    obj.routeAuthRefreshIntervalMs = 30 * 60 * 1000;
+    obj.routeAuthRefreshTimer = null;
     obj.VIEWS = __dirname + '/views/';
     obj.exports = [
       'onWebUIStartupEnd',
@@ -32,6 +35,14 @@ module.exports.routeplus = function (parent) {
     obj.server_startup = function() {
         obj.meshServer.pluginHandler.routeplus_db = require (__dirname + '/db.js').CreateDB(obj.meshServer);
         obj.db = obj.meshServer.pluginHandler.routeplus_db;
+        if (obj.routeAuthRefreshTimer == null) {
+            obj.routeAuthRefreshTimer = setInterval(function() {
+                obj.refreshAllOnlineRoutes('scheduled auth refresh');
+            }, obj.routeAuthRefreshIntervalMs);
+            setTimeout(function() {
+                obj.refreshAllOnlineRoutes('startup auth refresh');
+            }, 10000);
+        }
     };
 
     obj.getDomainIdFromUserId = function(userId) {
@@ -44,7 +55,7 @@ module.exports.routeplus = function (parent) {
             userid: userId,
             domainid: domainId,
             routeplus: 1,
-            expire: 0
+            expire: Date.now() + obj.routeAuthCookieLifetimeMs
         }, obj.meshServer.loginCookieEncryptionKey);
     };
 
@@ -80,6 +91,20 @@ module.exports.routeplus = function (parent) {
             });
             return Promise.resolve();
         });
+    };
+
+    obj.refreshAllOnlineRoutes = function(reason) {
+        if ((obj.db == null) || (typeof obj.db.getAllMyComputers !== 'function')) return;
+        obj.db.getAllMyComputers()
+        .then((myComputers) => {
+            myComputers.forEach(function(my) {
+                if (obj.isAgentOnline(my.node) !== true) return;
+                obj.startUserRoutes(my.user, my.node)
+                .catch(e => console.log('PLUGIN: RoutePlus: Error refreshing routes (' + reason + '): ', e));
+            });
+            return Promise.resolve();
+        })
+        .catch(e => console.log('PLUGIN: RoutePlus: Error listing route sources for refresh (' + reason + '): ', e));
     };
     
     obj.onWebUIStartupEnd = function() {

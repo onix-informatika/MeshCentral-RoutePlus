@@ -75,8 +75,16 @@ assert(
 
 assert(
   routeplusServer.includes('createRouteAuthCookie') &&
-    routeplusServer.includes('expire: 0'),
-  'RoutePlus should use non-expiring auth cookies for long-lived service tunnels'
+    routeplusServer.includes('Date.now() + obj.routeAuthCookieLifetimeMs') &&
+    !routeplusServer.includes('expire: 0'),
+  'RoutePlus should use future relay auth expiration timestamps for long-lived service tunnels'
+);
+
+assert(
+  routeplusDb.includes('getAllMyComputers') &&
+    routeplusServer.includes('routeAuthRefreshIntervalMs = 30 * 60 * 1000') &&
+    routeplusServer.includes('obj.refreshAllOnlineRoutes'),
+  'RoutePlus should periodically refresh route auth cookies for online source agents'
 );
 
 assert(

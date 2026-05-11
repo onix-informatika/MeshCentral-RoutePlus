@@ -51,6 +51,9 @@ module.exports.CreateDB = function(meshserver) {
         obj.getMyComputer = function(userId) {
             return obj.file.find({ type: 'myComputer', user: userId }).toArray();
         };
+        obj.getAllMyComputers = function () {
+            return obj.file.find({ type: 'myComputer' }).toArray();
+        };
         obj.getMyComputerByNode = function (nodeId) {
             return obj.file.find({ type: 'myComputer', node: nodeId }).toArray();
         };
