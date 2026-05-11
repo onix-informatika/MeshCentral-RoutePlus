@@ -90,6 +90,15 @@ function cloneRouteSettings(settings) {
     return copy;
 }
 
+function resetRouteHealthState(route) {
+    if (route == null) return;
+    route.consecutiveFailures = 0;
+    route.healthProbeInFlight = false;
+    route.restartRequested = false;
+    route.restartScheduled = false;
+    route.restartReason = null;
+}
+
 function buildRouteRelayOptions(settings) {
     if (settings.authCookie == null) {
         throw new Error('Route has no MeshCentral auth cookie');
@@ -212,6 +221,10 @@ function scheduleRouteHealthProbe(route, reason) {
         probe.request.on('error', function(e) {
             finishRouteHealthProbe(this.routeHealthProbe, false, 'probe request error: ' + safeErrorString(e));
         });
+        probe.request.on('response', function(res) {
+            try { res.resume(); } catch (e) { }
+            finishRouteHealthProbe(this.routeHealthProbe, false, 'probe HTTP response: ' + res.statusCode);
+        });
         probe.request.end();
     } catch (e) {
         finishRouteHealthProbe(probe, false, safeErrorString(e));
@@ -260,6 +273,7 @@ function consoleaction(args, rights, sessionid, parent) {
                         if ((typeof args.relayurl == 'string') && (args.relayurl.length > 0)) {
                             routeTrack[args.mid].settings.serverurl = args.relayurl;
                         }
+                        resetRouteHealthState(routeTrack[args.mid]);
                         dbg('Start / rebuild command sent when route is already listening. Refreshed auth and target settings.');
                         return;
                     }
@@ -412,6 +426,11 @@ function RoutePlusRoute() {
                 dbg("ERROR: " + safeErrorString(e));
                 reportRouteError(rObj.settings.mapid, 'websocketRequestError', e, rObj.settings.localport);
                 disconnectTunnel(this.tcp, this, "Websocket request error");
+            });
+            c.websocket.on('response', function (res) {
+                try { res.resume(); } catch (e) { }
+                reportRouteError(rObj.settings.mapid, 'websocketHttpResponse', 'HTTP ' + res.statusCode, rObj.settings.localport);
+                disconnectTunnel(this.tcp, this, 'Websocket HTTP response: ' + res.statusCode);
             });
             c.websocket.end();
         } catch (e) {

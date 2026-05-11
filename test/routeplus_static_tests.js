@@ -6,6 +6,14 @@ const routeplusCore = fs.readFileSync(
   path.join(__dirname, '..', 'modules_meshcore', 'routeplus.js'),
   'utf8'
 );
+const routeplusServer = fs.readFileSync(
+  path.join(__dirname, '..', 'routeplus.js'),
+  'utf8'
+);
+const routeplusDb = fs.readFileSync(
+  path.join(__dirname, '..', 'db.js'),
+  'utf8'
+);
 
 assert(
   !routeplusCore.includes("'?noping=1&auth=' + latestAuthCookie"),
@@ -63,4 +71,35 @@ assert(
 assert(
   routeplusCore.includes("disconnectTunnel(c, c.websocket, 'Connection setup exception')"),
   'RoutePlus should route setup exceptions through the shared cleanup path'
+);
+
+assert(
+  routeplusServer.includes('createRouteAuthCookie') &&
+    routeplusServer.includes('expire: 0'),
+  'RoutePlus should use non-expiring auth cookies for long-lived service tunnels'
+);
+
+assert(
+  !routeplusServer.includes('onlineUsers.indexOf') &&
+    routeplusServer.includes('obj.startUserRoutes(my.user, my.node)'),
+  'RoutePlus should start persisted source-agent routes without requiring an open web UI session'
+);
+
+assert(
+  routeplusDb.includes('getMapsToNode') &&
+    routeplusServer.includes('obj.db.getMapsToNode(checkedInNode)'),
+  'RoutePlus should refresh routes when mapped target agents check in'
+);
+
+assert(
+  routeplusServer.includes('targetAgentOffline') &&
+    routeplusServer.includes('obj.endRoute(map._id)'),
+  'RoutePlus should close local listeners for targets MeshCentral knows are offline'
+);
+
+assert(
+  routeplusCore.includes('resetRouteHealthState') &&
+    routeplusCore.includes('websocketHttpResponse') &&
+    routeplusCore.includes('probe HTTP response'),
+  'RoutePlus should reset unhealthy state on route refresh and report relay auth HTTP failures'
 );

@@ -33,6 +33,54 @@ module.exports.routeplus = function (parent) {
         obj.meshServer.pluginHandler.routeplus_db = require (__dirname + '/db.js').CreateDB(obj.meshServer);
         obj.db = obj.meshServer.pluginHandler.routeplus_db;
     };
+
+    obj.getDomainIdFromUserId = function(userId) {
+        var parts = (userId || '').split('/');
+        return parts.length > 1 ? parts[1] : '';
+    };
+
+    obj.createRouteAuthCookie = function(userId, domainId) {
+        return parent.parent.encodeCookie({
+            userid: userId,
+            domainid: domainId,
+            routeplus: 1,
+            expire: 0
+        }, obj.meshServer.loginCookieEncryptionKey);
+    };
+
+    obj.isAgentOnline = function(nodeId) {
+        return (nodeId != null) && (obj.meshServer.webserver != null) &&
+            (obj.meshServer.webserver.wsagents != null) &&
+            (obj.meshServer.webserver.wsagents[nodeId] != null);
+    };
+
+    obj.sendRouteError = function(map, reason, error) {
+        if (map == null) return;
+        obj.sendUpdateToUser(map.user, {
+            action: "plugin",
+            plugin: "routeplus",
+            method: "routeError",
+            mapId: map._id,
+            localport: map.localport,
+            toNode: map.toNode,
+            reason: reason,
+            error: error
+        });
+    };
+
+    obj.startUserRoutes = function(userId, sourceNode) {
+        return obj.cleanupStaleUserData(userId)
+        .then(() => obj.db.getUserMaps(userId))
+        .then(maps => {
+            if ((sourceNode == null) || (maps.length === 0)) return Promise.resolve();
+            var domainId = obj.getDomainIdFromUserId(userId);
+            var rcookie = obj.createRouteAuthCookie(userId, domainId);
+            maps.forEach(function(map) {
+                obj.startRoute(sourceNode, map, rcookie);
+            });
+            return Promise.resolve();
+        });
+    };
     
     obj.onWebUIStartupEnd = function() {
         var ld = document.querySelectorAll('#p2AccountActions > p.mL')[0];
@@ -86,7 +134,6 @@ module.exports.routeplus = function (parent) {
     
     obj.hook_userLoggedIn = function(user) {
         var myComp = null;
-        const rcookie = parent.parent.encodeCookie({ userid: user._id, domainid: user.domain }, obj.meshServer.loginCookieEncryptionKey);
         obj.debug('PLUGIN', 'RoutePlus', 'User logged in... Processing');
         obj.onlineNodes = Object.keys(obj.meshServer.webserver.wsagents);
         //console.log('s1', obj.meshServer.webserver.wssessions);
@@ -103,6 +150,7 @@ module.exports.routeplus = function (parent) {
             if (myComp == null) return;
             obj.debug('PLUGIN', 'RoutePlus', 'Number of user maps found: ' + maps.length);
             if (maps.length == 0) return;
+            const rcookie = obj.createRouteAuthCookie(user._id, user.domain);
             maps.forEach(map => {
                 //if (obj.onlineNodes.indexOf(fromNode) === -1) return; // skip offline nodes
                 obj.startRoute(myComp, map, rcookie);
@@ -113,29 +161,49 @@ module.exports.routeplus = function (parent) {
     };
     
     obj.hook_agentCoreIsStable = function(myparent, gp) { // check for remaps when an agent logs in
+        var checkedInNode = myparent.dbNodeKey;
         obj.db.getMyComputerByNode(myparent.dbNodeKey)
         .then((mys) => {
             if (mys.length) {
                 var my = mys[0];
-                obj.cleanupStaleUserData(my.user)
-                .then(() => obj.db.getUserMaps(my.user))
-                .then(maps => {
-                    var onlineUsers = Object.keys(obj.meshServer.webserver.wssessions);
-                    if (maps.length && onlineUsers.indexOf(my.user) !== -1) { // if we have a mapping and our user is online, map it
-                        var uinfo = my.user.split('/');
-                        var rcookie = parent.parent.encodeCookie({ userid: my.user, domainid: uinfo[1] }, obj.meshServer.loginCookieEncryptionKey);
-                        maps.forEach(function(map) {
-                            obj.startRoute(my.node, map, rcookie);
-                        });
-                    }
-                })
+                obj.startUserRoutes(my.user, my.node)
                 .catch(e => console.log('PLUGIN: RoutePlus: Error adding routes to agent on checkin 1: ', e));
             }
         })
         .catch(e => console.log('PLUGIN: RoutePlus: Error adding routes to agent on checkin 2: ', e));
+
+        obj.db.getMapsToNode(checkedInNode)
+        .then((maps) => {
+            if (maps.length === 0) return Promise.resolve();
+            maps.forEach(function(map) {
+                obj.db.getMyComputer(map.user)
+                .then((mcs) => {
+                    if (mcs.length === 0) return Promise.resolve();
+                    var domainId = obj.getDomainIdFromUserId(map.user);
+                    var rcookie = obj.createRouteAuthCookie(map.user, domainId);
+                    obj.startRoute(mcs[0].node, map, rcookie);
+                    return Promise.resolve();
+                })
+                .catch(e => console.log('PLUGIN: RoutePlus: Error refreshing route for online target: ', e));
+            });
+            return Promise.resolve();
+        })
+        .catch(e => console.log('PLUGIN: RoutePlus: Error checking maps for online target: ', e));
     };
     
     obj.startRoute = function(comp, map, rcookie) {
+        if (obj.isAgentOnline(comp) !== true) {
+            obj.debug('PLUGIN', 'RoutePlus', 'Could not start route ' + map._id + ', source agent offline: ' + comp);
+            return;
+        }
+
+        if (obj.isAgentOnline(map.toNode) !== true) {
+            obj.debug('PLUGIN', 'RoutePlus', 'Could not start route ' + map._id + ', target agent offline: ' + map.toNode);
+            obj.sendRouteError(map, 'targetAgentOffline', 'Target agent is not connected to MeshCentral');
+            obj.endRoute(map._id).catch(() => { });
+            return;
+        }
+
         var uinfo = map.user.split('/');
         var domainId = uinfo[1];
         var relayUrl = null;
@@ -379,8 +447,7 @@ module.exports.routeplus = function (parent) {
                 })
                 .then((maps) => {
                     if ((maps == null) || (maps.length === 0)) return;
-                    var uinfo = command.user.split('/');
-                    var rcookie = parent.parent.encodeCookie({ userid: command.user, domainid: uinfo[1] }, obj.meshServer.loginCookieEncryptionKey);
+                    var rcookie = obj.createRouteAuthCookie(command.user, obj.getDomainIdFromUserId(command.user));
 
                     obj.startRoute(myComp, maps[0], rcookie);
                 })
@@ -419,8 +486,7 @@ module.exports.routeplus = function (parent) {
                     return obj.db.getUserMaps(command.user)
                         .then(maps => {
                             if (maps.length == 0) return Promise.resolve();
-                            var uinfo = command.user.split('/');
-                            var rcookie = parent.parent.encodeCookie({ userid: command.user, domainid: uinfo[1] }, obj.meshServer.loginCookieEncryptionKey);
+                            var rcookie = obj.createRouteAuthCookie(command.user, obj.getDomainIdFromUserId(command.user));
                             maps.forEach(function(map) {
                                 obj.startRoute(command.node, map, rcookie);
                             });

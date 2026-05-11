@@ -45,6 +45,9 @@ module.exports.CreateDB = function(meshserver) {
         obj.getUserMaps = function(userId) {
             return obj.file.find( { user: userId, type: 'portMap' } ).toArray();
         };
+        obj.getMapsToNode = function(nodeId) {
+            return obj.file.find({ type: 'portMap', toNode: nodeId }).toArray();
+        };
         obj.getMyComputer = function(userId) {
             return obj.file.find({ type: 'myComputer', user: userId }).toArray();
         };

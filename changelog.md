@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Known Issues]
 - None. Please feel free to submit an issue via [GitHub](https://github.com/onix-informatika/MeshCentral-RoutePlus) if you find anything.
 
+## [0.1.8.6] - 2026-05-11
+### Fixed
+- Use non-expiring MeshCentral route auth cookies for long-lived RoutePlus service tunnels so mapped ports do not soft-disconnect after the default one-hour websocket auth window.
+- Start persisted routes when the source agent checks in, even when the web UI user session is not open.
+- Refresh dependent routes when a mapped target agent checks in.
+- Close local listeners and report a route error when MeshCentral knows the mapped target agent is offline, instead of leaving a local port open that cannot reach the remote service.
+- Report unexpected MeshCentral HTTP responses from relay requests so expired or rejected relay auth is visible.
+
 ## [0.1.8.5] - 2026-05-11
 ### Fixed
 - Store MeshCentral relay auth per route instead of using one global auth cookie across all active mappings.
