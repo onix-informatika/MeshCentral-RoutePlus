@@ -10,8 +10,8 @@ Port routing plugin for the [MeshCentral2](https://github.com/Ylianst/MeshCentra
 >     },
 Restart your MeshCentral server after making this change.
 
- To install, simply add the plugin configuration URL when prompted:
- `https://raw.githubusercontent.com/ryanblenis/MeshCentral-RoutePlus/master/config.json`
+ To install this fork, simply add the plugin configuration URL when prompted:
+ `https://raw.githubusercontent.com/onix-informatika/MeshCentral-RoutePlus/master/config.json`
 
 ## Features
 This plugin allows users to map local ports to remote ports on machines through the MeshCentral server, similar to how MeshCmd with an actions.txt forwards a port. However, instead of having MeshCmd, the user only needs a Mesh Agent installed on each machine.

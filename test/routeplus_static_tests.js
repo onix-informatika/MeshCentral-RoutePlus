@@ -1,0 +1,66 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const routeplusCore = fs.readFileSync(
+  path.join(__dirname, '..', 'modules_meshcore', 'routeplus.js'),
+  'utf8'
+);
+
+assert(
+  !routeplusCore.includes("'?noping=1&auth=' + latestAuthCookie"),
+  'RoutePlus must not use a single global auth cookie for all routes'
+);
+
+assert(
+  routeplusCore.includes('function buildRouteRelayOptions(settings)') &&
+    routeplusCore.includes("'?noping=1&auth=' + encodeURIComponent(settings.authCookie)"),
+  'RoutePlus should use the auth cookie stored on the route being opened'
+);
+
+assert(
+  routeplusCore.includes('setKeepAlive(true'),
+  'RoutePlus should enable TCP keepalive for long-lived SQL tunnels'
+);
+
+assert(
+  routeplusCore.includes('setNoDelay(true'),
+  'RoutePlus should disable Nagle delays for interactive tunnel traffic'
+);
+
+assert(
+  !routeplusCore.includes('restartAfterCompletedTunnels') &&
+    !routeplusCore.includes('completed tunnel threshold'),
+  'RoutePlus must not restart just because normal client tunnels completed'
+);
+
+assert(
+  routeplusCore.includes('scheduleRouteHealthProbe') &&
+    routeplusCore.includes('OnRouteHealthProbeWebSocket'),
+  'RoutePlus should probe the mapped target port before recreating a route'
+);
+
+assert(
+  routeplusCore.includes('requestRouteRestart'),
+  'RoutePlus should schedule route restarts through a single restart path'
+);
+
+assert(
+  routeplusCore.includes('requestRouteRestart(probe.route'),
+  'RoutePlus should recreate routes from failed target-port health probes'
+);
+
+assert(
+  routeplusCore.includes('c.routeplusRoute = rObj'),
+  'RoutePlus should attach route ownership before websocket setup so early failures are counted'
+);
+
+assert(
+  routeplusCore.includes('tcp.routeplusClosed'),
+  'RoutePlus should count each tunnel close once even when both TCP and websocket close events fire'
+);
+
+assert(
+  routeplusCore.includes("disconnectTunnel(c, c.websocket, 'Connection setup exception')"),
+  'RoutePlus should route setup exceptions through the shared cleanup path'
+);

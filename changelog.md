@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Known Issues]
-- None. Please feel free to submit an issue via [GitHub](https://github.com/ryanblenis/MeshCentral-RoutePlus) if you find anything.
+- None. Please feel free to submit an issue via [GitHub](https://github.com/onix-informatika/MeshCentral-RoutePlus) if you find anything.
+
+## [0.1.8.5] - 2026-05-11
+### Fixed
+- Store MeshCentral relay auth per route instead of using one global auth cookie across all active mappings.
+- Refresh active route settings when MeshCentral sends a rebuild command for an already-listening mapping.
+- Enable TCP keepalive and `NoDelay` for local and relay sockets used by long-running SQL tunnels.
+- Probe the mapped target port after failed tunnel handshakes and recreate the RoutePlus listener only when the target-port probe fails.
+- Count TCP/websocket tunnel cleanup once so normal MSSQL client disconnects do not trigger route recreation.
 
 ## [0.1.8.4] - 2026-03-19
 ### Fixed
