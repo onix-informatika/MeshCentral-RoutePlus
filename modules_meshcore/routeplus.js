@@ -535,7 +535,7 @@ function OnWebSocket(msg, s, head) {
             msg = msg.toString();
             if ((msg == 'c') || (msg == 'cr')) {
                 if (this.parent.route != null) { this.parent.route.consecutiveFailures = 0; }
-                this.parent.tunneling = true; this.tunneling = true; this.pipe(this.parent.tcp); this.parent.tcp.pipe(this); debug(1, "Tunnel active");
+                this.parent.tunneling = true; this.tunneling = true; this.pipe(this.parent.tcp, { dataTypeSkip: 1 }); this.parent.tcp.pipe(this); debug(1, "Tunnel active");
             } else if ((msg.length > 6) && (msg.substring(0, 6) == 'error:')) {
                 console.log(msg.substring(6));
                 disconnectTunnel(this.tcp, this, msg.substring(6));

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Known Issues]
 - None. Please feel free to submit an issue via [GitHub](https://github.com/onix-informatika/MeshCentral-RoutePlus) if you find anything.
 
+## [0.1.8.8] - 2026-05-11
+### Fixed
+- Match MeshCentral Router's tunnel framing by stripping the relay data-type byte before forwarding bytes to the mapped TCP target. This prevents framed relay bytes from corrupting MSSQL pre-login handshakes on RoutePlus tunnels.
+
 ## [0.1.8.7] - 2026-05-11
 ### Fixed
 - Use an absolute future relay expiration timestamp instead of `expire: 0`, which MeshCentral's relay layer treats as already expired.

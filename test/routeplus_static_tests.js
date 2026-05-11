@@ -37,6 +37,11 @@ assert(
 );
 
 assert(
+  routeplusCore.includes('this.pipe(this.parent.tcp, { dataTypeSkip: 1 })'),
+  'RoutePlus should strip the MeshCentral relay data-type byte before forwarding SQL tunnel bytes'
+);
+
+assert(
   !routeplusCore.includes('restartAfterCompletedTunnels') &&
     !routeplusCore.includes('completed tunnel threshold'),
   'RoutePlus must not restart just because normal client tunnels completed'
