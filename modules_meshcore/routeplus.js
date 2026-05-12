@@ -17,6 +17,8 @@ var debug_flag = false;
 var routeProbeTimeoutMs = 5000;
 var routeProbeCooldownMs = 5000;
 var routeRestartDelayMs = 750;
+var tunnelSetupTimeoutMs = 5000;
+var maxPendingTunnelBytes = 1024 * 1024;
 var lastStartRouteCall = {};
 var waitTimer = {};
 
@@ -82,6 +84,20 @@ function configureTunnelSocket(socket) {
     try {
         if (typeof socket.setNoDelay === 'function') { socket.setNoDelay(true); }
     } catch (ex) { }
+}
+
+function dataLength(data) {
+    if (data == null) return 0;
+    if (typeof data.length === 'number') return data.length;
+    if (typeof data.byteLength === 'number') return data.byteLength;
+    try { return data.toString().length; } catch (ex) { }
+    return 0;
+}
+
+function clearTunnelSetupTimer(tcp) {
+    if (tcp == null || tcp.routeplusSetupTimer == null) return;
+    try { clearTimeout(tcp.routeplusSetupTimer); } catch (ex) { }
+    tcp.routeplusSetupTimer = null;
 }
 
 function cloneRouteSettings(settings) {
@@ -395,10 +411,27 @@ function RoutePlusRoute() {
             }*/
             // 'connection' listener
             configureTunnelSocket(c);
+            c.routeplusTunnelActive = false;
+            c.routeplusPendingData = [];
+            c.routeplusPendingBytes = 0;
+            c.routeplusSetupTimer = setTimeout(function() {
+                if (c.routeplusClosed === true) return;
+                if (c.websocket != null && c.websocket.tunneling === true) return;
+                reportRouteError(rObj.settings.mapid, 'tunnelSetupTimeout', 'Tunnel did not become active within ' + tunnelSetupTimeoutMs + ' ms', rObj.settings.localport);
+                disconnectTunnel(c, c.websocket, 'Tunnel setup timeout');
+            }, tunnelSetupTimeoutMs);
+            c.on('data', function (data) {
+                if (this.routeplusTunnelActive === true) return;
+                this.routeplusPendingBytes += dataLength(data);
+                this.routeplusPendingData.push(data);
+                if (this.routeplusPendingBytes > maxPendingTunnelBytes) {
+                    reportRouteError(rObj.settings.mapid, 'pendingTunnelBufferExceeded', 'Pending tunnel data exceeded ' + maxPendingTunnelBytes + ' bytes', rObj.settings.localport);
+                    disconnectTunnel(this, this.websocket, 'Pending tunnel buffer exceeded');
+                }
+            });
             c.on('end', function () { disconnectTunnel(this, this.websocket, "Client closed"); });
             c.on('close', function () { disconnectTunnel(this, this.websocket, "Client socket closed"); });
             c.on('error', function (e) { disconnectTunnel(this, this.websocket, "Client socket error: " + safeErrorString(e)); });
-            c.pause();
             try {
                 if (rObj.settings.authCookie == null) {
                     reportRouteError(rObj.settings.mapid, 'missingAuthCookie', 'Route has no MeshCentral auth cookie', rObj.settings.localport);
@@ -507,6 +540,7 @@ function disconnectTunnel(tcp, ws, msg) {
         if (route == null && tcp.routeplusRoute != null) { route = tcp.routeplusRoute; }
         if (tcp.routeplusClosed === true) { alreadyClosed = true; }
     }
+    clearTunnelSetupTimer(tcp);
     if (alreadyClosed === true) {
         route = null;
     } else {
@@ -521,6 +555,7 @@ function disconnectTunnel(tcp, ws, msg) {
     if (tcp != null) {
         try { tcp.end(); } catch (e) { debug(2, e); }
         try { tcp.destroy(); } catch (e) { debug(2, e); }
+        try { tcp.routeplusPendingData = []; tcp.routeplusPendingBytes = 0; } catch (e) { }
     }
     debug(1, "Tunnel disconnected: " + msg);
     noteTunnelClosed(route, wasActive, msg);
@@ -535,7 +570,19 @@ function OnWebSocket(msg, s, head) {
             msg = msg.toString();
             if ((msg == 'c') || (msg == 'cr')) {
                 if (this.parent.route != null) { this.parent.route.consecutiveFailures = 0; }
-                this.parent.tunneling = true; this.tunneling = true; this.pipe(this.parent.tcp, { dataTypeSkip: 1 }); this.parent.tcp.pipe(this); debug(1, "Tunnel active");
+                clearTunnelSetupTimer(this.parent.tcp);
+                var pendingData = [];
+                if (this.parent.tcp != null) {
+                    pendingData = this.parent.tcp.routeplusPendingData || [];
+                    this.parent.tcp.routeplusPendingData = [];
+                    this.parent.tcp.routeplusPendingBytes = 0;
+                    this.parent.tcp.routeplusTunnelActive = true;
+                }
+                this.parent.tunneling = true; this.tunneling = true; this.pipe(this.parent.tcp, { dataTypeSkip: 1 });
+                for (var i = 0; i < pendingData.length; i++) {
+                    try { this.write(pendingData[i]); } catch (ex) { debug(2, ex); }
+                }
+                this.parent.tcp.pipe(this); debug(1, "Tunnel active");
             } else if ((msg.length > 6) && (msg.substring(0, 6) == 'error:')) {
                 console.log(msg.substring(6));
                 disconnectTunnel(this.tcp, this, msg.substring(6));

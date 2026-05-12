@@ -79,6 +79,21 @@ assert(
 );
 
 assert(
+  routeplusCore.includes('tunnelSetupTimeoutMs = 5000') &&
+    routeplusCore.includes('Tunnel setup timeout') &&
+    routeplusCore.includes('clearTunnelSetupTimer(this.parent.tcp)'),
+  'RoutePlus should clean up pending tunnel setup sockets before they fill the accept queue'
+);
+
+assert(
+  routeplusCore.includes('routeplusPendingData') &&
+    routeplusCore.includes('maxPendingTunnelBytes') &&
+    routeplusCore.includes('pendingData[i]') &&
+    !routeplusCore.includes('c.pause()'),
+  'RoutePlus should buffer early client bytes instead of leaving pre-login data paused in the kernel socket'
+);
+
+assert(
   routeplusServer.includes('createRouteAuthCookie') &&
     routeplusServer.includes('Date.now() + obj.routeAuthCookieLifetimeMs') &&
     !routeplusServer.includes('expire: 0'),
