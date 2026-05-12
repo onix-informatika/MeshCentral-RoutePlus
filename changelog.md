@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Known Issues]
 - None. Please feel free to submit an issue via [GitHub](https://github.com/onix-informatika/MeshCentral-RoutePlus) if you find anything.
 
+## [0.1.8.10] - 2026-05-12
+### Fixed
+- Force-rebuild source-agent routes after repeated pre-active tunnel failures or tunnel setup timeouts, and destroy tracked client sockets before recreating the listener. This clears MeshAgent accept queues that get stuck with MSSQL pre-login sockets in `CLOSE-WAIT`.
+
 ## [0.1.8.9] - 2026-05-12
 ### Fixed
 - Add a tunnel setup timeout that closes not-yet-active client sockets and triggers the existing health/restart path instead of leaving paused SQL pre-login sockets stuck in `CLOSE-WAIT`.

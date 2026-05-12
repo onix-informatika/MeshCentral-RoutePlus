@@ -94,6 +94,14 @@ assert(
 );
 
 assert(
+  routeplusCore.includes('clientSockets') &&
+    routeplusCore.includes('destroyRouteClients') &&
+    routeplusCore.includes('requestRouteRestart(rObj, \'tunnel setup timeout\', true)') &&
+    routeplusCore.includes('repeated pre-active tunnel failures'),
+  'RoutePlus should force-rebuild routes that wedge before the TCP tunnel becomes active'
+);
+
+assert(
   routeplusServer.includes('createRouteAuthCookie') &&
     routeplusServer.includes('Date.now() + obj.routeAuthCookieLifetimeMs') &&
     !routeplusServer.includes('expire: 0'),

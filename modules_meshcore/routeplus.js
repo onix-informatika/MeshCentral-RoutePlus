@@ -113,6 +113,7 @@ function resetRouteHealthState(route) {
     route.restartRequested = false;
     route.restartScheduled = false;
     route.restartReason = null;
+    route.restartForced = false;
 }
 
 function buildRouteRelayOptions(settings) {
@@ -125,13 +126,16 @@ function buildRouteRelayOptions(settings) {
 
 function maybeRestartRoute(route) {
     if (route == null || route.restartRequested !== true || route.restartScheduled === true) return;
-    if (route.activeClients > 0) return;
+    if (route.activeClients > 0 && route.restartForced !== true) return;
 
     route.restartScheduled = true;
     var mapid = route.settings.mapid;
     var oldOnListen = route.onListen;
     var reason = route.restartReason || 'unknown';
     dbg('Restarting route ' + mapid + ' after ' + reason);
+    if (route.restartForced === true) {
+        destroyRouteClients(route, 'Forced route restart: ' + reason);
+    }
 
     setTimeout(function() {
         if (routeTrack[mapid] !== route) return;
@@ -159,12 +163,43 @@ function maybeRestartRoute(route) {
     }, routeRestartDelayMs);
 }
 
-function requestRouteRestart(route, reason) {
-    if (route == null || route.restartRequested === true) return;
+function requestRouteRestart(route, reason, force) {
+    if (route == null) return;
+    if (route.restartRequested === true) {
+        if (force === true && route.restartForced !== true) {
+            route.restartForced = true;
+            route.restartReason = reason;
+            maybeRestartRoute(route);
+        }
+        return;
+    }
     route.restartRequested = true;
     route.restartReason = reason;
+    route.restartForced = force === true;
     dbg('Route ' + route.settings.mapid + ' queued for restart: ' + reason);
     maybeRestartRoute(route);
+}
+
+function trackRouteClient(route, socket) {
+    if (route == null || socket == null) return;
+    if (route.clientSockets == null) route.clientSockets = [];
+    route.clientSockets.push(socket);
+}
+
+function untrackRouteClient(route, socket) {
+    if (route == null || route.clientSockets == null || socket == null) return;
+    var index = route.clientSockets.indexOf(socket);
+    if (index >= 0) route.clientSockets.remove(index);
+}
+
+function destroyRouteClients(route, reason) {
+    if (route == null || route.clientSockets == null) return;
+    var sockets = route.clientSockets.slice(0);
+    route.clientSockets = [];
+    for (var i = 0; i < sockets.length; i++) {
+        try { disconnectTunnel(sockets[i], sockets[i].websocket, reason); } catch (e) { debug(2, e); }
+        try { sockets[i].destroy(); } catch (e) { debug(2, e); }
+    }
 }
 
 function noteTunnelClosed(route, wasActive, reason) {
@@ -175,6 +210,10 @@ function noteTunnelClosed(route, wasActive, reason) {
         route.consecutiveFailures = 0;
     } else {
         route.consecutiveFailures++;
+        if (route.consecutiveFailures >= 2) {
+            requestRouteRestart(route, 'repeated pre-active tunnel failures: ' + reason, true);
+            return;
+        }
         scheduleRouteHealthProbe(route, reason);
     }
 
@@ -385,6 +424,7 @@ function RoutePlusRoute() {
     
     rObj.tcpserver = null;
     rObj.onListen = null;
+    rObj.clientSockets = [];
     rObj.activeClients = 0;
     rObj.consecutiveFailures = 0;
     rObj.healthProbeInFlight = false;
@@ -399,6 +439,7 @@ function RoutePlusRoute() {
             rObj.activeClients++;
             c.routeplusRoute = rObj;
             c.routeplusClosed = false;
+            trackRouteClient(rObj, c);
             /*if (rObj.settings.isMagic === true && rObj.settings.magicNode != null) {
                 mesh.SendCommand({ 
                     "action": "plugin", 
@@ -419,6 +460,7 @@ function RoutePlusRoute() {
                 if (c.websocket != null && c.websocket.tunneling === true) return;
                 reportRouteError(rObj.settings.mapid, 'tunnelSetupTimeout', 'Tunnel did not become active within ' + tunnelSetupTimeoutMs + ' ms', rObj.settings.localport);
                 disconnectTunnel(c, c.websocket, 'Tunnel setup timeout');
+                requestRouteRestart(rObj, 'tunnel setup timeout', true);
             }, tunnelSetupTimeoutMs);
             c.on('data', function (data) {
                 if (this.routeplusTunnelActive === true) return;
@@ -430,7 +472,7 @@ function RoutePlusRoute() {
                 }
             });
             c.on('end', function () { disconnectTunnel(this, this.websocket, "Client closed"); });
-            c.on('close', function () { disconnectTunnel(this, this.websocket, "Client socket closed"); });
+            c.on('close', function () { untrackRouteClient(rObj, this); disconnectTunnel(this, this.websocket, "Client socket closed"); });
             c.on('error', function (e) { disconnectTunnel(this, this.websocket, "Client socket error: " + safeErrorString(e)); });
             try {
                 if (rObj.settings.authCookie == null) {
